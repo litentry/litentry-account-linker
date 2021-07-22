@@ -34,8 +34,8 @@ pub mod pallet {
 	/// Unique key for query
 	#[derive(Encode, Decode, Default, Debug)]
 	pub struct QueryKey<AccountId> {
-		account: AccountId,
-		data_source: urls::DataSource,
+		pub account: AccountId,
+		pub data_source: urls::DataSource,
 	}
 	
 	pub mod crypto {
@@ -103,25 +103,14 @@ pub mod pallet {
 		/// It just return the weight of on_finalize
 		fn on_initialize(block_number: T::BlockNumber) -> Weight {
 			log::info!("ocw on_initialize {:?}.", block_number);
-			1000
+			<T as pallet::Config>::WeightInfo::dummy()
 		}
 
 		/// The on_finalize trigger the query result aggregation.
 		/// The argument block_number has big impact on the weight.
 		fn on_finalize(block_number: T::BlockNumber) {
 			log::info!("ocw on_finalize.{:?}.", block_number);
-
-			let query_session_length: usize = T::QuerySessionLength::get() as usize;
-			let index_in_session = TryInto::<usize>::try_into(block_number).map_or(query_session_length, |bn| bn % query_session_length);
-			let last_block_number = query_session_length - 1;
-
-			// Clear claim at the first block of a session
-			if index_in_session == 0 {
-				Self::clear_claim();
-			// Do aggregation at last block of a session
-			} else if index_in_session == last_block_number {
-				Self::aggregate_query_result();
-			}
+			Self::do_finalize(block_number);
 		}
 
 		/// TODO block N offchain_worker will be called after block N+1 finalize
@@ -263,9 +252,34 @@ pub mod pallet {
 
 			Ok(().into())
 		}
+
+		#[pallet::weight(<T as pallet::Config>::WeightInfo::dummy())]
+		// dummy used to compute the weight of on_finalize
+		pub fn dummy(origin: OriginFor<T>, block_number: T::BlockNumber)-> DispatchResultWithPostInfo {
+			ensure_signed(origin)?;
+
+			Self::do_finalize(block_number);
+
+			Ok(().into())
+		}
 	}
 
 	impl<T: Config> Pallet<T> {
+		// 
+		fn do_finalize(block_number: T::BlockNumber) {
+			let query_session_length: usize = T::QuerySessionLength::get() as usize;
+			let index_in_session = TryInto::<usize>::try_into(block_number).map_or(query_session_length, |bn| bn % query_session_length);
+			let last_block_number = query_session_length - 1;
+
+			// Clear claim at the first block of a session
+			if index_in_session == 0 {
+				Self::clear_claim();
+			// Do aggregation at last block of a session
+			} else if index_in_session == last_block_number {
+				Self::aggregate_query_result();
+			}
+		}
+
 		// Main entry for ocw
 		fn query(block_number: T::BlockNumber, info: &urls::TokenInfo) {
 			// Get my ocw account for submit query result
